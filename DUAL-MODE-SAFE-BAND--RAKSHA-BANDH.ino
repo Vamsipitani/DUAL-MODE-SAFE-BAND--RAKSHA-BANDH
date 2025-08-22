@@ -23,13 +23,8 @@ HardwareSerial SerialGPS(1);
 HardwareSerial SerialGSM(2); 
 #define GSM_RX 26   
 #define GSM_TX 27   
-#define PHONE_NUMBER "+919676591916"  
+#define PHONE_NUMBER "+91xxxxxxxxxx"  
 
-// ---------- USER CONFIG ----------
-String userName = "Yashwanth";   // user name
-double defaultLat = 16.523580;   // fallback latitude
-double defaultLng = 80.612959;   // fallback longitude
-// ---------------------------------
 
 unsigned long lastButtonPress = 0;
 int buttonPressCount = 0;
@@ -173,23 +168,21 @@ void sendSOS(const char* msg) {
   showMessage(msg);
   Serial.println(msg);
 
-  // --- Use GPS if valid, else fallback ---
-  double lat, lng;
-  if (gps.location.isValid()) {
-    lat = gps.location.lat();
-    lng = gps.location.lng();
-  } else {
-    lat = defaultLat;
-    lng = defaultLng;
+  if (!gps.location.isValid()) {
+    showMessage("No GPS Fix\nWaiting...");
+    Serial.println("SOS not sent: No GPS fix available");
+    sosActive = false;
+    return;
   }
 
-  // --- Serial Monitor ---
+  double lat = gps.location.lat();
+  double lng = gps.location.lng();
+
   Serial.print("Latitude: "); Serial.println(lat, 6);
   Serial.print("Longitude: "); Serial.println(lng, 6);
   Serial.print("Google Maps: https://maps.google.com/?q=");
   Serial.print(lat, 6); Serial.print(","); Serial.println(lng, 6);
 
-  // --- OLED ---
   display.clearDisplay();
   display.setCursor(0, 10);
   display.println(msg);
@@ -199,8 +192,7 @@ void sendSOS(const char* msg) {
   display.display();
   delay(3000);
 
-  // --- SMS Message ---
-  String smsText = "⚠️ SOS Alert ⚠️\n";
+  String smsText = "⚠ SOS Alert ⚠\n";
   smsText += "User: " + userName + "\n";
   smsText += String(msg) + "\n";
   smsText += "Lat: " + String(lat, 6) + "\n";
