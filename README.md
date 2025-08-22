@@ -1,237 +1,106 @@
-#include <Wire.h>
-#include <Adafruit_ADXL345_U.h>
-#include <Adafruit_Sensor.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#include <TinyGPS++.h>
-#include <HardwareSerial.h>
+Smart Safety Wearable (ESP32 + GPS + GSM + ADXL345 + OLED)
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+A Smart Safety Wearable designed for personal safety, especially for women, that sends SOS alerts with GPS location automatically during emergencies (fall detection, abnormal movement) or manually via a button press.
 
-Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified();
+Features
 
-#define BUZZER_PIN 18
-#define BUTTON_PIN 19
+Manual SOS Trigger: Double-press a button to send an SOS alert.
 
-TinyGPSPlus gps;
-HardwareSerial SerialGPS(1); 
-#define RXD2 16  
-#define TXD2 17  
+Automatic SOS Detection: Detects multiple shakes or abnormal motion using ADXL345 accelerometer.
 
-HardwareSerial SerialGSM(2); 
-#define GSM_RX 26   
-#define GSM_TX 27   
-#define PHONE_NUMBER "+919676591916"  
+False Alarm Prevention: Device vibrates/buzzes for 5 seconds before sending auto SOS, allowing cancellation.
 
-// ---------- USER CONFIG ----------
-String userName = "Yashwanth";   // user name
-double defaultLat = 16.523580;   // fallback latitude
-double defaultLng = 80.612959;   // fallback longitude
-// ---------------------------------
+GPS Location Sharing: Sends latitude, longitude, and Google Maps link via SMS.
 
-unsigned long lastButtonPress = 0;
-int buttonPressCount = 0;
+OLED Display: Displays system status, GPS info, and alerts.
 
-bool sosActive = false;
-bool buzzerActive = false;
-unsigned long buzzerStartTime = 0;
+GSM Module Support: Sends SOS messages via SIM800/SIM900 or compatible modules.
 
-int shakeCount = 0;
-unsigned long lastShakeTime = 0;
-const int SHAKE_THRESHOLD = 15;   
-const int REQUIRED_SHAKES = 5;      
-const int SHAKE_TIMEOUT = 1500;    
+Hardware Required
 
-void setup() {
-  Serial.begin(115200);
-  SerialGPS.begin(9600, SERIAL_8N1, RXD2, TXD2);  
-  SerialGSM.begin(9600, SERIAL_8N1, GSM_RX, GSM_TX); 
+ESP32 Development Board
 
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+SIM800L/SIM900 GSM Module (or any AT-command-compatible GSM module)
 
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println(F("SSD1306 failed"));
-    while(1);
-  }
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
+Neo-6M GPS Module
 
-  if(!accel.begin()) {
-    Serial.println("ADXL345 not detected");
-    while(1);
-  }
-  accel.setRange(ADXL345_RANGE_16_G);
+ADXL345 Accelerometer (I2C)
 
-  showMessage("System Ready");
-  delay(2000);
+0.96" OLED Display (I2C, SSD1306)
 
-  initGSM();
-}
+Push Button (SOS Trigger/Cancel)
 
-void loop() {
-  while (SerialGPS.available() > 0) {
-    gps.encode(SerialGPS.read());
-  }
+Buzzer (Alert notification)
 
-  checkButton();
-  checkAccelerometer();
-  handleBuzzer();
-}
+Jumper wires, breadboard or PCB
 
-void initGSM() {
-  delay(1000);
-  Serial.println("Initializing GSM...");
-  SerialGSM.println("AT");
-  delay(500);
-  SerialGSM.println("AT+CMGF=1");  
-  delay(500);
-  SerialGSM.println("AT+CNMI=1,2,0,0,0");
-  delay(500);
-}
+Pin Configuration
+Component	ESP32 Pin
+GPS TX	GPIO16
+GPS RX	GPIO17
+GSM TX	GPIO26
+GSM RX	GPIO27
+OLED SDA	GPIO21
+OLED SCL	GPIO22
+Buzzer	GPIO18
+Button	GPIO19
+Software Libraries Used
 
-void checkButton() {
-  static bool lastState = HIGH;
-  bool currentState = digitalRead(BUTTON_PIN);
+Install these libraries via Arduino IDE Library Manager:
 
-  if (lastState == HIGH && currentState == LOW) {
-    unsigned long now = millis();
-    if (now - lastButtonPress < 400) {
-      buttonPressCount++;
-    } else {
-      buttonPressCount = 1;
-    }
-    lastButtonPress = now;
-  }
-  lastState = currentState;
+Adafruit_GFX
 
-  if (buttonPressCount == 1 && (millis() - lastButtonPress > 500) && buzzerActive) {
-    cancelSOS();
-    buttonPressCount = 0;
-  }
+Adafruit_SSD1306
 
-  if (buttonPressCount == 2 && (millis() - lastButtonPress > 500)) {
-    sendSOS("Manual SOS Sent");
-    buttonPressCount = 0;
-  }
-}
+Adafruit_Sensor
 
-void checkAccelerometer() {
-  sensors_event_t event; 
-  accel.getEvent(&event);
+Adafruit_ADXL345_U
 
-  float x = abs(event.acceleration.x);
-  float y = abs(event.acceleration.y);
-  float z = abs(event.acceleration.z);
+TinyGPS++
 
-  if (x > SHAKE_THRESHOLD || y > SHAKE_THRESHOLD || z > SHAKE_THRESHOLD) {
-    unsigned long now = millis();
-    if (now - lastShakeTime < SHAKE_TIMEOUT) {
-      shakeCount++;
-    } else {
-      shakeCount = 1;
-    }
-    lastShakeTime = now;
-    Serial.println("Shake detected!");
-    showMessage("Shake Detected");
+How It Works
 
-    if (shakeCount >= REQUIRED_SHAKES && !sosActive) {
-      triggerFalseDetection();
-    }
-  }
-}
+Setup Phase:
 
-void triggerFalseDetection() {
-  buzzerActive = true;
-  buzzerStartTime = millis();
-  digitalWrite(BUZZER_PIN, HIGH);
-  showMessage("False Alert?\nPress Btn");
-}
+Initializes GSM, GPS, OLED, and Accelerometer.
 
-void handleBuzzer() {
-  if (buzzerActive && millis() - buzzerStartTime >= 5000) {
-    digitalWrite(BUZZER_PIN, LOW);
-    buzzerActive = false;
-    sendSOS("Auto SOS Sent");
-  }
-}
+Displays "System Ready" on OLED.
 
-void cancelSOS() {
-  digitalWrite(BUZZER_PIN, LOW);
-  buzzerActive = false;
-  sosActive = false;
-  shakeCount = 0;
-  showMessage("SOS Cancelled\nSystem Ready");
-  Serial.println("SOS Cancelled");
-}
+Manual SOS:
 
-void sendSOS(const char* msg) {
-  sosActive = true;
-  showMessage(msg);
-  Serial.println(msg);
+Double press the button → Sends SOS with location via SMS.
 
-  // --- Use GPS if valid, else fallback ---
-  double lat, lng;
-  if (gps.location.isValid()) {
-    lat = gps.location.lat();
-    lng = gps.location.lng();
-  } else {
-    lat = defaultLat;
-    lng = defaultLng;
-  }
+Automatic SOS:
 
-  // --- Serial Monitor ---
-  Serial.print("Latitude: "); Serial.println(lat, 6);
-  Serial.print("Longitude: "); Serial.println(lng, 6);
-  Serial.print("Google Maps: https://maps.google.com/?q=");
-  Serial.print(lat, 6); Serial.print(","); Serial.println(lng, 6);
+Detects multiple shakes (configurable threshold).
 
-  // --- OLED ---
-  display.clearDisplay();
-  display.setCursor(0, 10);
-  display.println(msg);
-  display.setCursor(0, 25);
-  display.print("Lat: "); display.println(lat, 6);
-  display.print("Lng: "); display.println(lng, 6);
-  display.display();
-  delay(3000);
+Triggers buzzer for 5 seconds → If not canceled → Sends SOS automatically.
 
-  // --- SMS Message ---
-  String smsText = "⚠️ SOS Alert ⚠️\n";
-  smsText += "User: " + userName + "\n";
-  smsText += String(msg) + "\n";
-  smsText += "Lat: " + String(lat, 6) + "\n";
-  smsText += "Lng: " + String(lng, 6) + "\n";
-  smsText += "Map: https://maps.google.com/?q=" + String(lat, 6) + "," + String(lng, 6);
+SMS Format:
 
-  sendSMS(PHONE_NUMBER, smsText);
+⚠ SOS Alert ⚠
+Manual/Auto SOS Triggered
+Lat: 12.345678
+Lng: 98.765432
+Map: https://maps.google.com/?q=12.345678,98.765432
 
-  showMessage("System Ready");
-  sosActive = false;
-  shakeCount = 0;
-}
+Installation
 
-void sendSMS(String number, String text) {
-  Serial.println("Sending SMS...");
-  SerialGSM.println("AT+CMGF=1");  
-  delay(500);
-  SerialGSM.print("AT+CMGS=\"");
-  SerialGSM.print(number);
-  SerialGSM.println("\"");
-  delay(500);
-  SerialGSM.print(text);
-  delay(500);
-  SerialGSM.write(26); 
-  delay(5000);
-  Serial.println("SMS Sent!");
-}
+Clone this repository:
 
-void showMessage(const char* msg) {
-  display.clearDisplay();
-  display.setCursor(0, 20);
-  display.println(msg);
-  display.display();
-}
+git clone https://github.com/your-username/smart-safety-wearable.git
+
+
+Open the .ino file in Arduino IDE.
+
+Select ESP32 Dev Module in Tools > Board.
+
+Connect and upload the code.
+
+Future Improvements
+
+Add IoT backend (MQTT/HTTP) for cloud-based tracking.
+
+Add voice module for emergency call.
+
+Add low-power optimization for longer battery life.
